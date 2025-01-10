@@ -1,0 +1,188 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [vector]
+}
+
+enum ContentType {
+  IMAGE
+  VIDEO
+  ARTICLE
+  AUDIO
+  TEXT
+  NOTE
+}
+
+model Content {
+  id            Int                    @id @default(autoincrement())
+  link          String
+  type          ContentType
+  title         String
+  extractedText String?
+  aiTags        String[]
+  imageLabels   String[]
+  metadata      Json? // Add this field for platform-specific metadata
+  keywords      String[]
+  embedding     Unsupported("vector")? // Store OpenAI embeddings
+  duration      Float?
+  author        String?
+  publishedAt   DateTime?
+  tags          TagsOnContents[]
+  user          User                   @relation(fields: [userId], references: [id])
+  userId        Int
+  share         Boolean                @default(false)
+  links         Link[]
+  contexts      ContentContext[]
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  relatedTo     Content[]              @relation("ContentRelations")
+  relatedFrom   Content[]              @relation("ContentRelations")
+  topics        Topic[]
+  clusters      Cluster[]
+  learningPath  LearningPath?          @relation(fields: [pathId], references: [id])
+  pathId        Int?
+  pathOrder     Int? // Position in learning path
+  shares        Share[]
+  posts         Post[]
+  summaries     Summary[]
+
+  @@index([title])
+  @@index([type])
+  @@index([aiTags])
+  @@index([keywords])
+  @@index([author])
+}
+
+model Tag {
+  id       Int              @id @default(autoincrement())
+  title    String           @unique
+  contents TagsOnContents[]
+}
+
+// Junction table for many-to-many relation between Tag and Content
+model TagsOnContents {
+  tag       Tag     @relation(fields: [tagId], references: [id])
+  tagId     Int
+  content   Content @relation(fields: [contentId], references: [id])
+  contentId Int
+
+  @@id([tagId, contentId])
+}
+
+model User {
+  id            Int            @id @default(autoincrement())
+  email         String         @unique
+  name          String
+  password      String
+  contents      Content[]
+  links         Link[]
+  learningPaths LearningPath[]
+  shares        Share[]
+}
+
+model Link {
+  id        Int      @id @default(autoincrement())
+  hash      String
+  user      User     @relation(fields: [userId], references: [id])
+  userId    Int
+  content   Content  @relation(fields: [contentId], references: [id])
+  contentId Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([hash])
+  @@index([userId])
+  @@index([contentId])
+}
+
+model ContentContext {
+  id           Int      @id @default(autoincrement())
+  sourceUrl    String?
+  selectedText String?
+  pageContext  String?
+  captureTime  DateTime @default(now())
+  userThought  String?
+  contentId    Int
+  content      Content  @relation(fields: [contentId], references: [id])
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([contentId])
+}
+
+model Topic {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String?
+  contents    Content[]
+  clusters    Cluster[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Cluster {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  contents    Content[]
+  topics      Topic[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model LearningPath {
+  id          Int       @id @default(autoincrement())
+  name        String
+  description String?
+  contents    Content[]
+  createdBy   User      @relation(fields: [userId], references: [id])
+  userId      Int
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+model Share {
+  id         Int      @id @default(autoincrement())
+  content    Content  @relation(fields: [contentId], references: [id])
+  contentId  Int
+  platforms  String[]
+  customText String?
+  user       User     @relation(fields: [userId], references: [id])
+  userId     Int
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Post {
+  id        Int      @id @default(autoincrement())
+  platform  String
+  contentId Int
+  content   Content  @relation(fields: [contentId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contentId])
+}
+
+model Summary {
+  id        Int      @id @default(autoincrement())
+  text      String   @db.Text
+  style     String
+  contentId Int
+  content   Content  @relation(fields: [contentId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contentId])
+}

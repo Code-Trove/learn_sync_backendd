@@ -1,1 +1,1 @@
-(()=>{"use strict";console.log("Background script running")})();
+(()=>{"use strict";chrome.runtime.onMessage.addListener((function(e,o,s){if("auth"===e.type){console.log("OAuth Token Received:",e.session);var r=new URLSearchParams(e.session),t=r.get("oauth_token"),n=r.get("oauth_verifier");t&&n?chrome.storage.local.set({oauthToken:t,oauthVerifier:n},(function(){console.log("Tokens stored successfully!"),s({success:!0})})):(console.error("Tokens not received properly."),s({success:!1}))}return!0}))})();

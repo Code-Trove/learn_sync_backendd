@@ -6,6 +6,8 @@
     "extension:dev": "webpack --watch --mode development"
   },
   "dependencies": {
+    "@types/js-cookie": "^3.0.6",
+    "js-cookie": "^3.0.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-icons": "^5.4.0",
@@ -14,6 +16,7 @@
     "react-toastify": "^11.0.2"
   },
   "devDependencies": {
+    "@types/chrome": "^0.0.293",
     "@types/react": "^18.2.0",
     "@types/react-dom": "^18.2.0",
     "autoprefixer": "^10.4.20",

@@ -7,15 +7,28 @@ import {
   generateContentEmbedding,
   generateEmbedding,
 } from "../utils/embeddings";
-import {
-  generateContentSummary,
-  SummaryStyle,
-} from "../utils/summary-generator";
-import { craftPlatformPost } from "../utils/post-crafter";
+
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import cheerio from "cheerio";
+import { craftPlatformPost, Platform } from "../utils/post-crafter";
 
 const prisma = new PrismaClient();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
+
+interface QuickCaptureOptions {
+  instantSave: boolean;
+  autoTagging: boolean;
+  contextPreservation: boolean;
+  sharingOptions: boolean;
+}
+
+interface AuthRequest extends Request {
+  user: {
+    id: number;
+    // other user properties...
+  };
+}
 
 export const addContent = async (req: Request, res: Response): Promise<any> => {
   try {
@@ -452,164 +465,183 @@ export const searchContent = async (
   }
 };
 
-export const generateSummary = async (
+export const schedulePost = async (
   req: Request,
   res: Response
 ): Promise<void> => {
   try {
-    const { contentId } = req.params;
-    const { style = "professional" } = req.query;
+    const { platform, contentId, scheduledAt } = req.body;
 
-    // Get content with its embedding
-    interface ContentWithEmbedding {
-      id: number;
-      title: string;
-      extractedText: string;
-      metadata: any;
-      keywords: string[];
-      embedding: number[];
-      tags: any[];
-    }
+    const scheduledPost = await prisma.scheduledPost.create({
+      data: {
+        platform,
+        craftedPostId: contentId,
+        scheduledAt: new Date(scheduledAt),
+      },
+    });
 
-    const content = await prisma.$queryRaw<ContentWithEmbedding[]>`
-      SELECT 
-        c.id,
-        c.title,
-        c.extracted_text as "extractedText",
-        c.metadata,
-        c.keywords,
-        c.embedding,
-        json_agg(json_build_object('tag', t.*)) as tags
-      FROM "Content" c
-      LEFT JOIN "TagsOnContents" tc ON c.id = tc.content_id
-      LEFT JOIN "Tag" t ON tc.tag_id = t.id
-      WHERE c.id = ${Number(contentId)}
-      GROUP BY c.id
-    `;
+    res.status(201).json({
+      message: "Post scheduled successfully",
+      data: scheduledPost,
+      success: true,
+    });
+  } catch (error) {
+    console.error("Error scheduling post:", error);
+    res.status(500).json({
+      message: "Error scheduling post",
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+};
 
-    if (!content[0]) {
+export const postScheduledContent = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { scheduledPostId } = req.body;
+
+    const scheduledPost = await prisma.scheduledPost.findUnique({
+      where: { id: scheduledPostId },
+      include: { craftedPost: true },
+    });
+
+    if (!scheduledPost) {
       res.status(404).json({
-        message: "Content not found",
+        message: "Scheduled post not found",
         success: false,
       });
       return;
     }
 
-    // Generate summary
-    const summary = await generateContentSummary(
+    // Post content to the specified platform
+    const postContent = await craftPlatformPost(
       {
-        title: content[0].title,
-        extractedText: content[0].extractedText || "",
-        metadata: content[0].metadata,
-        keywords: content[0].keywords,
+        summary: scheduledPost.craftedPost.content || "",
+        keyPoints: scheduledPost.craftedPost.hashtags,
+        learnings: "Scheduled post from my learning journey",
       },
-      style as SummaryStyle
+      scheduledPost.platform as Platform,
+      "minimal"
     );
 
-    // Find related content using embeddings
-    const relatedContent = await prisma.$queryRaw`
-      SELECT c.id, c.title, 
-             1 - (c.embedding <=> ${content[0].embedding}::vector) as similarity
-      FROM "Content" c
-      WHERE c.id != ${content[0].id}
-      ORDER BY similarity DESC
-      LIMIT 5
-    `;
-
-    // Add chat functionality
-    const chatContext = {
-      title: content[0].title,
-      summary: summary.tldr,
-      keyPoints: summary.keyPoints,
-    };
-
-    // Generate platform-specific posts
-    const posts = await Promise.all([
-      craftPlatformPost(
-        {
-          summary: summary.tldr,
-          keyPoints: summary.keyPoints,
-          learnings: "What I learned from this content", // User can customize this
-        },
-        "linkedin"
-      ),
-      craftPlatformPost(
-        {
-          summary: summary.tldr,
-          keyPoints: summary.keyPoints,
-          learnings: "Key takeaway",
-        },
-        "twitter",
-        "thread"
-      ),
-    ]);
+    // Mark the post as posted
+    await prisma.scheduledPost.update({
+      where: { id: scheduledPostId },
+      data: { posted: true },
+    });
 
     res.status(200).json({
-      message: "Summary generated successfully",
-      data: {
-        summary,
-        relatedContent,
-        chatContext,
-        socialPosts: {
-          linkedin: posts[0],
-          twitter: posts[1],
-        },
-      },
+      message: "Post published successfully",
+      data: postContent,
       success: true,
     });
   } catch (error) {
-    console.error("Error generating summary:", error);
+    console.error("Error posting scheduled content:", error);
     res.status(500).json({
-      message: "Internal server error",
+      message: "Error posting scheduled content",
       success: false,
       error: (error as Error).message,
     });
   }
 };
 
-// Add a new endpoint for continuing the chat
-export const chatWithContent = async (
+export const saveAndScheduleCraftedPost = async (
   req: Request,
   res: Response
 ): Promise<void> => {
   try {
-    const { contentId } = req.params;
-    const { message, context } = req.body;
+    const { platform, content, hashtags, scheduledAt } = req.body;
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
-
-    const prompt = `You are an expert discussing: ${context.title}. 
-                   You have deep knowledge of this content and can answer questions about it.
-                   Summary: ${context.summary}
-                   Key Points: ${context.keyPoints.join(", ")}
-                   
-                   User Question: ${message}`;
-
-    const result = await model.generateContent({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-    });
-
-    const response = result.response;
-    const text = response.text();
-
-    res.status(200).json({
-      message: "Chat response generated",
+    const craftedPost = await prisma.craftedPost.create({
       data: {
-        response: text,
+        platform,
+        content,
+        hashtags,
+        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
       },
-      success: true,
     });
+
+    if (scheduledAt) {
+      const scheduledPost = await prisma.scheduledPost.create({
+        data: {
+          platform,
+          craftedPostId: craftedPost.id,
+          scheduledAt: new Date(scheduledAt),
+        },
+      });
+
+      res.status(201).json({
+        message: "Crafted post saved and scheduled successfully",
+        data: { craftedPost, scheduledPost },
+        success: true,
+      });
+    } else {
+      res.status(201).json({
+        message: "Crafted post saved successfully",
+        data: craftedPost,
+        success: true,
+      });
+    }
   } catch (error) {
-    console.error("Error in chat:", error);
+    console.error("Error saving and scheduling crafted post:", error);
     res.status(500).json({
-      message: "Internal server error",
+      message: "Error saving and scheduling crafted post",
       success: false,
       error: (error as Error).message,
     });
   }
 };
 
-// Clean up Prisma connection on server shutdown
-process.on("beforeExit", async () => {
-  await prisma.$disconnect();
-});
+export const postScheduledCraftedPost = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const { scheduledPostId } = req.body;
+
+    const scheduledPost = await prisma.scheduledPost.findUnique({
+      where: { id: scheduledPostId },
+      include: { craftedPost: true },
+    });
+
+    if (!scheduledPost) {
+      res.status(404).json({
+        message: "Scheduled post not found",
+        success: false,
+      });
+      return;
+    }
+
+    // Post content to the specified platform
+    const postContent = await craftPlatformPost(
+      {
+        summary: scheduledPost.craftedPost.content,
+        keyPoints: [],
+        learnings: "Scheduled post from my learning journey",
+      },
+      scheduledPost.platform as Platform,
+      "minimal"
+    );
+
+    // Mark the post as posted
+    await prisma.scheduledPost.update({
+      where: { id: scheduledPostId },
+      data: { posted: true },
+    });
+
+    res.status(200).json({
+      message: "Post published successfully",
+      data: postContent,
+      success: true,
+    });
+  } catch (error) {
+    console.error("Error posting scheduled crafted post:", error);
+    res.status(500).json({
+      message: "Error posting scheduled crafted post",
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+};

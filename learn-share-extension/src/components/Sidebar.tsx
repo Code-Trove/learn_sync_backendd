@@ -27,10 +27,14 @@ const Sidebar: React.FC<Props> = ({ text, onClose }) => {
   const [isSharing, setIsSharing] = useState(false);
   const [isExploring, setIsExploring] = useState(false);
   const [shareText, setShareText] = useState(text);
+  const [discussion, setDiscussion] = useState<string[]>([]);
 
   const handleChat = async () => {
     const userMessage = conversation.trim();
     if (!userMessage) return;
+
+    // Extract full page context
+    const pageContext = document.body.innerText;
 
     try {
       const response = await fetch(
@@ -41,19 +45,52 @@ const Sidebar: React.FC<Props> = ({ text, onClose }) => {
           body: JSON.stringify({
             content: text,
             question: userMessage,
+            pageContext: pageContext,
+            sourceUrl: window.location.href,
           }),
         }
       );
 
       const data = await response.json();
+      const botResponse = data.response;
+
       setAllMessages((prev) => [
         ...prev,
         `You: ${userMessage}`,
-        `Bot: ${data.answer}`,
+        `Bot: ${botResponse}`,
+      ]);
+      setDiscussion((prev) => [
+        ...prev,
+        `User: ${userMessage}`,
+        `Bot: ${botResponse}`,
       ]);
       setConversation("");
     } catch (error) {
       console.error("Error during chat:", error);
+    }
+  };
+
+  const handleGenerateSummary = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:3125/api/v1/content/summary",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: text, discussion }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        setSummary(data.summary);
+        setIsSummaryGenerated(true);
+      } else {
+        alert("Failed to generate summary.");
+      }
+    } catch (error) {
+      console.error("Error generating summary:", error);
+      alert("Error generating summary.");
     }
   };
 
@@ -140,6 +177,16 @@ const Sidebar: React.FC<Props> = ({ text, onClose }) => {
           >
             Send
           </button>
+          <div className="mt-4">
+            <h3 className="font-bold">Chat Messages:</h3>
+            <div className="bg-gray-100 p-2 rounded h-40 overflow-y-auto">
+              {allMessages.map((msg, index) => (
+                <p key={index} className="mb-2">
+                  {msg}
+                </p>
+              ))}
+            </div>
+          </div>
         </div>
       )}
 
@@ -157,6 +204,23 @@ const Sidebar: React.FC<Props> = ({ text, onClose }) => {
           >
             Craft Post
           </button>
+        </div>
+      )}
+
+      {discussion.length > 0 && (
+        <div className="mt-4">
+          <button
+            onClick={handleGenerateSummary}
+            className="bg-yellow-500 text-white px-4 py-2 rounded"
+          >
+            Generate Summary
+          </button>
+          {isSummaryGenerated && (
+            <div className="mt-4">
+              <h3 className="font-bold">Summary:</h3>
+              <p className="bg-gray-100 p-2 rounded">{summary}</p>
+            </div>
+          )}
         </div>
       )}
 
@@ -209,7 +273,7 @@ const Sidebar: React.FC<Props> = ({ text, onClose }) => {
             <p className="my-2">{posts.facebook}</p>
             <FacebookShareButton
               url={"https://yourwebsite.com"}
-              title={posts.facebook}
+              hashtag={"#" + posts.facebook.split(" ")[0]}
             >
               <button className="bg-blue-600 text-white px-4 py-2 rounded flex items-center gap-2">
                 <FaFacebook />

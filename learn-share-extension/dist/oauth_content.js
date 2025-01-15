@@ -1,0 +1,1 @@
+(()=>{"use strict";window.onload=function(){var o=window.location.search;chrome.runtime.sendMessage({type:"auth",session:o},(function(o){console.log("OAuth Callback processed:",o),window.close()}))}})();

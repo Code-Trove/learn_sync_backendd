@@ -3,6 +3,7 @@ import { requiredBody, signInBody } from "../zod/user-zod";
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
+import passport from "passport";
 
 const prisma = new PrismaClient();
 
@@ -17,7 +18,7 @@ export const SignUp = async (req: Request, res: Response): Promise<void> => {
     }
 
     const { name, email, password } = req.body;
-    
+
     // Check if user exists using Prisma
     const findUserExist = await prisma.user.findUnique({
       where: {
@@ -72,7 +73,7 @@ export const signIn = async (req: Request, res: Response): Promise<void> => {
       });
       return;
     }
-
+    console.log(req.body);
     const { email, password } = req.body;
 
     // Find user using Prisma
@@ -102,7 +103,7 @@ export const signIn = async (req: Request, res: Response): Promise<void> => {
     const token = jwt.sign(
       { id: findUser.id, email: findUser.email },
       process.env.JWT_SECRET || "SSH_256_789",
-      { expiresIn: "1h" }
+      { expiresIn: "12h" }
     );
 
     res.status(200).json({
@@ -120,7 +121,36 @@ export const signIn = async (req: Request, res: Response): Promise<void> => {
   }
 };
 
+export const linkTwitterAccount = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
+  try {
+    const user = req.user;
+
+    if (!user) {
+      res.status(404).json({
+        message: "User not found",
+        success: false,
+      });
+      return;
+    }
+
+    // Proceed with Twitter authentication
+    passport.authenticate("twitter")(req, res, () => {
+      res.redirect("/auth/twitter");
+    });
+  } catch (error) {
+    console.error("Error linking Twitter account:", error);
+    res.status(500).json({
+      message: "Error linking Twitter account",
+      success: false,
+      error: (error as Error).message,
+    });
+  }
+};
+
 // Don't forget to add this when the server is shutting down
-process.on('beforeExit', async () => {
+process.on("beforeExit", async () => {
   await prisma.$disconnect();
 });

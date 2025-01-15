@@ -1,13 +1,12 @@
 import { Request, Response } from "express";
 import { PrismaClient } from "@prisma/client";
-import OpenAI from 'openai';
-import cheerio from 'cheerio';
-import { craftPlatformPost, Platform } from '../utils/post-crafter';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import cheerio from "cheerio";
+import { craftPlatformPost, Platform } from "../utils/post-crafter";
 
 const prisma = new PrismaClient();
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
+const model = genAI.getGenerativeModel({ model: "gemini-1.5-pro" });
 
 interface QuickCaptureOptions {
   instantSave: boolean;
@@ -23,20 +22,21 @@ interface AuthRequest extends Request {
   };
 }
 
-export const captureContext = async (req: Request, res: Response): Promise<void> => {
+export const captureContext = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
-    const { sourceUrl, selectedText, pageContext, userThought, contentId } = req.body;
+    const { sourceUrl, selectedText, pageContext, userThought, contentId } =
+      req.body;
 
-    const enhancedContext = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "You're an expert at understanding context and enhancing learning materials."
-        },
+    const prompt = {
+      contents: [
         {
           role: "user",
-          content: `
+          parts: [
+            {
+              text: `
             URL: ${sourceUrl}
             Selected Text: ${selectedText}
             Page Context: ${pageContext}
@@ -46,10 +46,15 @@ export const captureContext = async (req: Request, res: Response): Promise<void>
             1. Key concepts mentioned
             2. Related topics
             3. Potential learning paths
-          `
-        }
-      ]
-    });
+          `,
+            },
+          ],
+        },
+      ],
+    };
+
+    const result = await model.generateContent(prompt);
+    const enhancedContext = result.response.text();
 
     const context = await prisma.contentContext.create({
       data: {
@@ -58,74 +63,73 @@ export const captureContext = async (req: Request, res: Response): Promise<void>
         pageContext,
         userThought,
         content: {
-          connect: { id: contentId }
-        }
-      }
+          connect: { id: contentId },
+        },
+      },
     });
 
     res.status(201).json({
       message: "Context captured successfully",
       data: {
         context,
-        enhancement: enhancedContext.choices[0].message.content
+        enhancement: enhancedContext,
       },
-      success: true
+      success: true,
     });
-
   } catch (error) {
     console.error("Error capturing context:", error);
     res.status(500).json({
       message: "Error capturing context",
       success: false,
-      error: (error as Error).message
+      error: (error as Error).message,
     });
   }
 };
 
-export const getContextsForContent = async (req: Request, res: Response): Promise<void> => {
+export const getContextsForContent = async (
+  req: Request,
+  res: Response
+): Promise<void> => {
   try {
     const { contentId } = req.params;
 
     const contexts = await prisma.contentContext.findMany({
       where: {
-        contentId: Number(contentId)
+        contentId: Number(contentId),
       },
       orderBy: {
-        captureTime: 'desc'
-      }
+        captureTime: "desc",
+      },
     });
 
     res.status(200).json({
       message: "Contexts retrieved successfully",
       data: contexts,
-      success: true
+      success: true,
     });
-
   } catch (error) {
     console.error("Error retrieving contexts:", error);
     res.status(500).json({
       message: "Error retrieving contexts",
       success: false,
-      error: (error as Error).message
+      error: (error as Error).message,
     });
   }
 };
 
-export const quickCapture = async (req: AuthRequest, res: Response): Promise<void> => {
+export const quickCapture = async (
+  req: AuthRequest,
+  res: Response
+): Promise<void> => {
   try {
     const { selectedText, sourceUrl, options } = req.body;
-
-    // Auto-generate tags and metadata using AI
-    const enhancedContent = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "You're an expert at analyzing content and extracting key information."
-        },
+    const contentPrompt = {
+      contents: [
         {
           role: "user",
-          content: `
+          parts: [
+            {
+              text: `
             Analyze this content and provide:
             1. Key topics (as tags)
             2. Brief summary
@@ -134,35 +138,37 @@ export const quickCapture = async (req: AuthRequest, res: Response): Promise<voi
 
             Content: ${selectedText}
             Source: ${sourceUrl}
-          `
-        }
-      ]
-    });
+          `,
+            },
+          ],
+        },
+      ],
+    };
 
-    const analysis = enhancedContent.choices[0].message.content || '';
-    
-    // Create content with auto-generated metadata
+    const result = await model.generateContent(contentPrompt);
+    const analysis = result.response.text();
+
     const content = await prisma.content.create({
       data: {
         link: sourceUrl,
-        type: 'TEXT',
-        title: sourceUrl.split('/').pop() || 'Quick Capture',
+        type: "TEXT",
+        title: sourceUrl.split("/").pop() || "Quick Capture",
         extractedText: selectedText,
-        keywords: analysis.split('\n')
-          .filter(line => line.startsWith('- '))
-          .map(tag => tag.replace('- ', '')),
+        keywords: analysis
+          .split("\n")
+          .filter((line) => line.startsWith("- "))
+          .map((tag) => tag.replace("- ", "")),
         metadata: {
           quickCapture: true,
           analysis,
-          captureDate: new Date().toISOString()
+          captureDate: new Date().toISOString(),
         },
         user: {
-          connect: { id: req.user.id } // Assuming you have user auth middleware
-        }
-      }
+          connect: { id: req.user.id }, // Assuming you have user auth middleware
+        },
+      },
     });
 
-    // If context preservation is enabled
     if (options.contextPreservation) {
       await prisma.contentContext.create({
         data: {
@@ -170,29 +176,23 @@ export const quickCapture = async (req: AuthRequest, res: Response): Promise<voi
           selectedText,
           pageContext: await getPageContext(sourceUrl),
           content: {
-            connect: { id: content.id }
-          }
-        }
+            connect: { id: content.id },
+          },
+        },
       });
     }
 
-    // If sharing options are enabled, generate social posts
     let socialPosts;
     if (options.sharingOptions) {
       socialPosts = await generateQuickSharePosts(selectedText, analysis);
     }
-
-    // Add relationship suggestions
-    const relationshipSuggestions = await openai.chat.completions.create({
-      model: "gpt-4",
-      messages: [
-        {
-          role: "system",
-          content: "You're an expert at identifying content relationships and learning paths."
-        },
+    const relationshipPrompt = {
+      contents: [
         {
           role: "user",
-          content: `
+          parts: [
+            {
+              text: `
             Analyze this content and suggest:
             1. Related topics it should be connected to
             2. What learning path it might belong to
@@ -200,10 +200,15 @@ export const quickCapture = async (req: AuthRequest, res: Response): Promise<voi
 
             Content: ${selectedText}
             Analysis: ${analysis}
-          `
-        }
-      ]
-    });
+          `,
+            },
+          ],
+        },
+      ],
+    };
+
+    const suggestionsResult = await model.generateContent(relationshipPrompt);
+    const relationshipSuggestions = suggestionsResult.response.text();
 
     res.status(201).json({
       message: "Content captured successfully",
@@ -211,17 +216,16 @@ export const quickCapture = async (req: AuthRequest, res: Response): Promise<voi
         content,
         socialPosts,
         analysis,
-        relationshipSuggestions: relationshipSuggestions.choices[0].message.content
+        relationshipSuggestions,
       },
-      success: true
+      success: true,
     });
-
   } catch (error) {
     console.error("Error in quick capture:", error);
     res.status(500).json({
       message: "Error capturing content",
       success: false,
-      error: (error as Error).message
+      error: (error as Error).message,
     });
   }
 };
@@ -231,31 +235,33 @@ async function getPageContext(url: string): Promise<string> {
     const response = await fetch(url);
     const html = await response.text();
     const $ = cheerio.load(html);
-    
+
     return JSON.stringify({
-      title: $('title').text(),
-      description: $('meta[name="description"]').attr('content') || '',
-      keywords: $('meta[name="keywords"]').attr('content') || ''
+      title: $("title").text(),
+      description: $('meta[name="description"]').attr("content") || "",
+      keywords: $('meta[name="keywords"]').attr("content") || "",
     });
   } catch (error) {
     console.error("Error fetching page context:", error);
-    return '';
+    return "";
   }
 }
 
 async function generateQuickSharePosts(text: string, analysis: string) {
-  const platforms = ['twitter', 'linkedin'];
+  const platforms = ["twitter", "linkedin"];
   return Promise.all(
-    platforms.map(platform => 
+    platforms.map((platform) =>
       craftPlatformPost(
         {
           summary: text,
-          keyPoints: analysis.split('\n').filter(line => line.startsWith('- ')),
-          learnings: "Quick capture from my learning journey"
+          keyPoints: analysis
+            .split("\n")
+            .filter((line) => line.startsWith("- ")),
+          learnings: "Quick capture from my learning journey",
         },
         platform as Platform,
-        'minimal'
+        "minimal"
       )
     )
   );
-}                                                                                                                       
+}

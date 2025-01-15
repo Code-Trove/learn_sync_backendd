@@ -82,8 +82,14 @@ model TagsOnContents {
 
 model User {
   id            Int            @id @default(autoincrement())
-  email         String         @unique
+  email         String?        @unique
   name          String
+  username      String?        @unique
+  twitterId     String?        @unique
+  twitterToken  String?
+  twitterSecret String?
+  linkedinId    String?        @unique
+  linkedinToken String?
   password      String
   contents      Content[]
   links         Link[]
@@ -116,7 +122,7 @@ model ContentContext {
   contentId    Int
   content      Content  @relation(fields: [contentId], references: [id])
   createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  updatedAt    DateTime @default(now())
 
   @@index([contentId])
 }
@@ -149,7 +155,7 @@ model LearningPath {
   createdBy   User      @relation(fields: [userId], references: [id])
   userId      Int
   createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  updatedAt   DateTime  @default(now())
 }
 
 model Share {
@@ -170,7 +176,7 @@ model Post {
   contentId Int
   content   Content  @relation(fields: [contentId], references: [id])
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now())
 
   @@index([contentId])
 }
@@ -182,7 +188,48 @@ model Summary {
   contentId Int
   content   Content  @relation(fields: [contentId], references: [id])
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now())
 
   @@index([contentId])
+}
+
+model ScheduledPost {
+  id            Int         @id @default(autoincrement())
+  platform      String
+  craftedPostId Int
+  craftedPost   CraftedPost @relation(fields: [craftedPostId], references: [id])
+  scheduledAt   DateTime
+  posted        Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  @@index([craftedPostId])
+  @@index([scheduledAt])
+}
+
+model CraftedPost {
+  id             Int             @id @default(autoincrement())
+  platform       String
+  content        String          @db.Text
+  hashtags       String[]
+  scheduledAt    DateTime?
+  posted         Boolean         @default(false)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  scheduledPosts ScheduledPost[]
+
+  @@index([platform])
+  @@index([scheduledAt])
+}
+
+model OAuthState {
+  id               Int      @id @default(autoincrement())
+  state            String   @unique // For CSRF protection
+  oauthToken       String // Twitter OAuth token
+  oauthTokenSecret String // Twitter OAuth token secret
+  expiresAt        DateTime // Expiration timestamp
+  createdAt        DateTime @default(now())
+
+  @@index([state])
+  @@index([expiresAt])
 }

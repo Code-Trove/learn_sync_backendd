@@ -1,4 +1,5 @@
 import express from "express";
+import passport from "passport";
 import {
   addContent,
   getAllContent,
@@ -7,8 +8,10 @@ import {
   makeContentPrivate,
   accessSharedContent,
   searchContent,
-  generateSummary,
-  chatWithContent,
+  schedulePost,
+  postScheduledContent,
+  saveAndScheduleCraftedPost,
+  postScheduledCraftedPost,
 } from "../controller/content-controller";
 import { PrismaClient } from "@prisma/client";
 import { OpenAI } from "openai";
@@ -24,8 +27,15 @@ router.post("/share/public", makeContentPublic); // Make content public
 router.post("/share/private", makeContentPrivate); // Make content private again
 router.get("/shared/:hash", accessSharedContent);
 router.get("/search", searchContent);
-router.get("/content/:contentId/summary", generateSummary);
-router.post("/content/:contentId/chat", chatWithContent);
+
+// New routes for scheduling and posting content
+router.post("/content/schedule", schedulePost);
+router.post("/content/postScheduled", postScheduledContent);
+
+// New route for saving and scheduling crafted posts
+router.post("/content/saveAndScheduleCraftedPost", saveAndScheduleCraftedPost);
+router.post("/content/postScheduledCraftedPost", postScheduledCraftedPost);
+
 router.get("/captures/recent", getAllContent);
 
 // Add this function to create a test user if it doesn't exist
@@ -48,38 +58,6 @@ async function getOrCreateTestUser() {
 }
 
 // Update the captures/recent POST route
-router.post("/captures/recent", async (req, res) => {
-  try {
-    const { content, url, type, timestamp } = req.body;
-
-    // Get or create test user
-    const user = await getOrCreateTestUser();
-
-    const capture = await prisma.content.create({
-      data: {
-        link: url,
-        type: type.toUpperCase(),
-        title: content.substring(0, 50) + "...",
-        extractedText: content,
-        keywords: [],
-        aiTags: [],
-        imageLabels: [],
-        userId: user.id, // Use the test user's ID
-      },
-    });
-
-    res.status(201).json({
-      success: true,
-      data: capture,
-    });
-  } catch (error) {
-    console.error("Error saving capture:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to save capture",
-    });
-  }
-});
 
 // Update the explore endpoint
 router.post("/content/explore", async (req, res) => {
@@ -128,44 +106,21 @@ router.post("/content/explore", async (req, res) => {
   }
 });
 
-// Add this route
-router.get("/captures/recent", async (req, res) => {
-  try {
-    const captures = await prisma.content.findMany({
-      orderBy: {
-        createdAt: "desc",
-      },
-      take: 10,
-      include: {
-        user: true,
-      },
-    });
-
-    res.status(200).json({
-      success: true,
-      data: captures,
-    });
-  } catch (error) {
-    console.error("Error fetching captures:", error);
-    res.status(500).json({
-      success: false,
-      error: "Failed to fetch captures",
-    });
-  }
-});
-
 router.post(
   "/content/chat",
   async (req: Request, res: Response): Promise<void> => {
     try {
-      const { content, question } = req.body;
-      console.log("Received content:", content);
+      const { content, question, pageContext, sourceUrl } = req.body;
+      // console.log("Received content:", content);
       console.log("Received question:", question);
+      // console.log("Received page context:", pageContext);
+      // console.log("Received source URL:", sourceUrl);
 
-      if (!content || !question) {
+      if (!content || !question || !pageContext || !sourceUrl) {
         res.status(400).json({
           success: false,
-          error: "Both content and question must be provided",
+          error:
+            "Content, question, page context, and source URL must be provided",
         });
         return;
       }
@@ -210,11 +165,17 @@ router.post(
             parts: [
               {
                 text: `
+                Full Page Context: "${pageContext}"
+                Source URL: "${sourceUrl}"
+                
                 Content for analysis: "${content}"
                 
                 User's Question: "${question}"
                 
                 Answer the user's question directly with a detailed explanation. If the question is unclear, politely ask for clarification. If the question is related to the content, explain thoroughly using real-world analogies, practical examples, and references for clarity.
+                
+                After answering, ask the user:
+                "Would you like to move to the next topic or deep dive into this topic?"
               `,
               },
             ],
@@ -233,6 +194,7 @@ router.post(
           body: JSON.stringify(requestBody),
         }
       );
+      console.log("Gemini API response status:", response);
 
       const data = await response.json();
       console.log(
@@ -525,4 +487,7 @@ router.post(
     }
   }
 );
+
+// Local authentication routes
+
 export default router;

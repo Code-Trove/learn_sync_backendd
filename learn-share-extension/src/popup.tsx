@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+
 import { createRoot } from "react-dom/client";
+import Cookies from "js-cookie";
 import { FaTwitter, FaLinkedin, FaFacebook, FaInstagram } from "react-icons/fa";
 import {
   TwitterShareButton,
@@ -7,6 +9,140 @@ import {
   FacebookShareButton,
   InstapaperShareButton,
 } from "react-share";
+
+interface LoginProps {
+  onLogin: () => void;
+  onSwitchToRegister: () => void;
+}
+
+const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToRegister }) => {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleLogin = async () => {
+    try {
+      const response = await fetch("http://localhost:3125/api/v1/auth/signin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        Cookies.set("token", data.token);
+        onLogin();
+      } else {
+        alert("Login failed.");
+      }
+    } catch (error) {
+      console.error("Error logging in:", error);
+      alert("Error logging in.");
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Login</h1>
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className="w-full p-2 border rounded mb-2"
+        placeholder="Email"
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        className="w-full p-2 border rounded mb-2"
+        placeholder="Password"
+      />
+      <button
+        onClick={handleLogin}
+        className="bg-blue-500 text-white px-4 py-2 rounded"
+      >
+        Login
+      </button>
+      <button
+        onClick={onSwitchToRegister}
+        className="mt-2 text-blue-500 underline"
+      >
+        Register
+      </button>
+    </div>
+  );
+};
+
+interface RegisterProps {
+  onRegister: () => void;
+  onSwitchToLogin: () => void;
+}
+
+const Register: React.FC<RegisterProps> = ({ onRegister, onSwitchToLogin }) => {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const handleRegister = async () => {
+    try {
+      const response = await fetch("http://localhost:3125/api/v1/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        alert("Registration successful. Please log in.");
+        onSwitchToLogin();
+      } else {
+        alert("Registration failed.");
+      }
+    } catch (error) {
+      console.error("Error registering:", error);
+      alert("Error registering.");
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <h1 className="text-2xl font-bold mb-4">Register</h1>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="w-full p-2 border rounded mb-2"
+        placeholder="Name"
+      />
+      <input
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className="w-full p-2 border rounded mb-2"
+        placeholder="Email"
+      />
+      <input
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        className="w-full p-2 border rounded mb-2"
+        placeholder="Password"
+      />
+      <button
+        onClick={handleRegister}
+        className="bg-blue-500 text-white px-4 py-2 rounded"
+      >
+        Register
+      </button>
+      <button
+        onClick={onSwitchToLogin}
+        className="mt-2 text-blue-500 underline"
+      >
+        Login
+      </button>
+    </div>
+  );
+};
 
 const Popup = () => {
   const [thought, setThought] = useState("");
@@ -18,6 +154,10 @@ const Popup = () => {
   });
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);
+  const [isTwitterConnected, setIsTwitterConnected] = useState(false);
+  const [twitterScreenName, setTwitterScreenName] = useState<string | null>(
+    null
+  );
 
   const handleCraftThought = async () => {
     try {
@@ -64,6 +204,171 @@ const Popup = () => {
       alert("Error searching content.");
     }
   };
+  // First, let's define our message types
+  interface TwitterOAuthMessage {
+    type: "oauth_tokens_ready";
+    data: {
+      oauthVerifier: string;
+      oauthToken: string;
+    };
+  }
+
+  const handleConnectTwitter = async () => {
+    try {
+      const token = Cookies.get("token");
+      if (!token) {
+        alert("User token is missing. Please log in first.");
+        return;
+      }
+
+      const response = await fetch(
+        "http://localhost:3125/api/v1/auth/twitter/request-token",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          credentials: "include",
+        }
+      );
+
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to initiate Twitter connection");
+      }
+
+      const { authUrl, state, oauthToken } = data;
+
+      await chrome.storage.local.set({
+        twitter_oauth_state: state,
+        twitter_oauth_token: oauthToken,
+      });
+
+      chrome.windows.create(
+        {
+          url: authUrl,
+          type: "popup",
+          width: 600,
+          height: 800,
+        },
+        (createdWindow) => {
+          if (!createdWindow?.id)
+            throw new Error("Failed to create popup window");
+
+          chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+            if (
+              tab.windowId === createdWindow.id &&
+              changeInfo.url?.includes("oauth_verifier")
+            ) {
+              try {
+                const urlParams = new URLSearchParams(
+                  new URL(changeInfo.url).search
+                );
+                const oauthVerifier = urlParams.get("oauth_verifier");
+                const returnedOauthToken = urlParams.get("oauth_token");
+
+                if (returnedOauthToken !== oauthToken) {
+                  throw new Error("OAuth token mismatch");
+                }
+
+                const finalResponse = await fetch(
+                  "http://localhost:3125/api/v1/auth/twitter/access-token",
+                  {
+                    method: "POST",
+                    headers: {
+                      "Content-Type": "application/json",
+                      Authorization: `Bearer ${token}`,
+                    },
+                    body: JSON.stringify({
+                      oauthToken: returnedOauthToken,
+                      oauthVerifier,
+                      state,
+                    }),
+                    credentials: "include",
+                  }
+                );
+
+                const finalData = await finalResponse.json();
+                if (!finalResponse.ok || !finalData.success) {
+                  throw new Error(
+                    finalData.error || "Failed to verify Twitter account"
+                  );
+                }
+
+                // ✅ Store the connected state in local storage
+                localStorage.setItem(
+                  "twitterConnection",
+                  JSON.stringify({
+                    isConnected: true,
+                    screenName: finalData.screenName,
+                  })
+                );
+
+                alert(
+                  `Successfully connected to Twitter as @${finalData.screenName}`
+                );
+                setIsTwitterConnected(true); // Update the React state
+                chrome.windows.remove(createdWindow.id);
+                globalThis.window.location.reload();
+              } catch (error) {
+                console.error("Error during OAuth exchange:", error);
+                chrome.windows.remove(createdWindow.id);
+                alert(error instanceof Error ? error.message : "OAuth failed");
+              }
+            }
+          });
+        }
+      );
+    } catch (error) {
+      console.error("Error initiating Twitter connection:", error);
+      alert(
+        error instanceof Error
+          ? `Error connecting: ${error.message}`
+          : "An unexpected error occurred"
+      );
+    }
+  };
+  const handlePostToTwitter = async () => {
+    try {
+      const token = Cookies.get("token"); // User's session token
+      const response = await fetch(
+        "http://localhost:3125/api/v1/post/twitter",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ content: craftedThoughts.twitter }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        alert("Tweet posted successfully!");
+      } else {
+        alert(`Failed to post tweet: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("Error posting to Twitter:", error);
+      alert("An unexpected error occurred.");
+    }
+  };
+
+  useEffect(() => {
+    const connectionData = localStorage.getItem("twitterConnection");
+    if (connectionData) {
+      const { isConnected, screenName } = JSON.parse(connectionData);
+      setIsTwitterConnected(isConnected);
+      setTwitterScreenName(screenName);
+    }
+  }, []);
+  const handleDisconnectTwitter = () => {
+    localStorage.removeItem("twitterConnection");
+    setIsTwitterConnected(false);
+    setTwitterScreenName(null);
+    alert("Disconnected from Twitter.");
+  };
 
   return (
     <div className="p-4">
@@ -105,15 +410,25 @@ const Popup = () => {
               <h4 className="font-bold">Twitter Thought</h4>
             </div>
             <p className="my-2">{craftedThoughts.twitter}</p>
-            <TwitterShareButton
-              url={"https://yourwebsite.com"}
-              title={craftedThoughts.twitter}
-            >
-              <button className="bg-[#1DA1F2] text-white px-4 py-2 rounded flex items-center gap-2">
+            {isTwitterConnected ? (
+              <button
+                onClick={handlePostToTwitter}
+                className="bg-[#1DA1F2] text-white px-4 py-2 rounded flex items-center gap-2"
+              >
                 <FaTwitter />
-                Share on Twitter
+                Post to Twitter
               </button>
-            </TwitterShareButton>
+            ) : (
+              <div>
+                <button
+                  onClick={handleConnectTwitter}
+                  className="bg-[#1DA1F2] text-white px-4 py-2 rounded flex items-center gap-2"
+                >
+                  <FaTwitter />
+                  Connect with Twitter
+                </button>
+              </div>
+            )}
           </div>
 
           {/* LinkedIn Thought */}
@@ -169,6 +484,12 @@ const Popup = () => {
               </button>
             </InstapaperShareButton>
           </div>
+          <div>
+            <p>Connected to Twitter as @{twitterScreenName}</p>
+            <button onClick={handleDisconnectTwitter}>
+              Disconnect Twitter
+            </button>
+          </div>
         </div>
       )}
 
@@ -204,5 +525,31 @@ const Popup = () => {
   );
 };
 
+const App = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isRegistering, setIsRegistering] = useState(false);
+
+  useEffect(() => {
+    const token = Cookies.get("token");
+    if (token) {
+      setIsLoggedIn(true);
+    }
+  }, []);
+
+  return isLoggedIn ? (
+    <Popup />
+  ) : isRegistering ? (
+    <Register
+      onRegister={() => setIsRegistering(false)}
+      onSwitchToLogin={() => setIsRegistering(false)}
+    />
+  ) : (
+    <Login
+      onLogin={() => setIsLoggedIn(true)}
+      onSwitchToRegister={() => setIsRegistering(true)}
+    />
+  );
+};
+
 const root = createRoot(document.getElementById("root")!);
-root.render(<Popup />);
+root.render(<App />);

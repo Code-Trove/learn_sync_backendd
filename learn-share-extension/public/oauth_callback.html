@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OAuth Callback</title>
+  </head>
+  <body>
+    <h1>Processing OAuth...</h1>
+    <script>
+      // Capture the query parameters returned by Twitter
+      const urlParams = new URLSearchParams(window.location.search);
+      const oauthVerifier = urlParams.get("oauth_verifier");
+      const oauthToken = urlParams.get("oauth_token");
+
+      if (oauthVerifier && oauthToken) {
+        chrome.runtime.sendMessage(
+          {
+            type: "oauth_tokens_ready",
+            data: { oauthVerifier, oauthToken },
+          },
+          () => {
+            window.close(); // Close the OAuth tab after sending the message
+          }
+        );
+      } else {
+        console.error("Missing OAuth parameters");
+        alert("OAuth failed. Please try again.");
+      }
+    </script>
+  </body>
+</html>

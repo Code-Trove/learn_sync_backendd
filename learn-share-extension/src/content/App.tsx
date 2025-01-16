@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import SelectionPopup from "../components/SelectionPopup";
 import Sidebar from "../components/Sidebar";
+import { AuthProvider } from "../context/AuthContext";
 
 const App = () => {
   const [selection, setSelection] = useState<{
@@ -60,26 +61,28 @@ const App = () => {
 
   return (
     <>
-      {/* Show Popup */}
-      {selection && !showSidebar && (
-        <SelectionPopup
-          text={selection.text}
-          position={selection.position}
-          onClose={() => setSelection(null)}
-          onExplore={handleExploreClick}
-          onShare={handleShare}
-        />
-      )}
+      <AuthProvider>
+        {/* Show Popup */}
+        {selection && !showSidebar && (
+          <SelectionPopup
+            text={selection.text}
+            position={selection.position}
+            onClose={() => setSelection(null)}
+            onExplore={handleExploreClick}
+            onShare={handleShare}
+          />
+        )}
 
-      {/* Show Sidebar */}
-      {showSidebar && (
-        <Sidebar
-          text={selectedText} // Pass the selected text to the sidebar
-          onClose={() => {
-            setShowSidebar(false); // Close the slider
-          }}
-        />
-      )}
+        {/* Show Sidebar */}
+        {showSidebar && (
+          <Sidebar
+            text={selectedText} // Pass the selected text to the sidebar
+            onClose={() => {
+              setShowSidebar(false); // Close the slider
+            }}
+          />
+        )}
+      </AuthProvider>
     </>
   );
 };

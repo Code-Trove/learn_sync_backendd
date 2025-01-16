@@ -1,5 +1,6 @@
-import React, { useState } from "react";
-
+import React, { useState, useEffect } from "react";
+import Cookies from "js-cookie";
+import { useAuth } from "../context/AuthContext";
 interface Props {
   text: string;
   position: { x: number; y: number };
@@ -11,7 +12,6 @@ interface Props {
 interface SaveContentRequest {
   type: "TEXT";
   title: string;
-  userId: number;
   tags: string[];
   link: string;
   extractedText: string;
@@ -22,14 +22,21 @@ const SelectionPopup: React.FC<Props> = ({
   position,
   onClose,
   onExplore,
-  onShare, // Destructure onShare prop
+  onShare,
 }) => {
+  const { token } = useAuth(); // Destructure token from the auth context
+
   const handleSave = async () => {
+    if (!token) {
+      alert("You need to be logged in to save content.");
+      return;
+    }
+
     try {
       // Get current URL
       const currentUrl = window.location.href;
 
-      // Generate title from first few words of selected text
+      // Generate title from the first few words of the selected text
       const title = text.split(" ").slice(0, 5).join(" ") + "...";
 
       // Extract keywords for tags
@@ -39,14 +46,14 @@ const SelectionPopup: React.FC<Props> = ({
         .slice(0, 3)
         .map((word) => word.toLowerCase());
 
-      const saveRequest: SaveContentRequest = {
+      const saveRequest = {
         type: "TEXT",
         title,
-        userId: 1, // Should come from auth context
         tags, // Send tags directly
         link: currentUrl,
         extractedText: text,
       };
+      console.log("Save request:", saveRequest);
 
       const response = await fetch(
         "http://localhost:3125/api/v1/content/addContent",
@@ -54,6 +61,7 @@ const SelectionPopup: React.FC<Props> = ({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify(saveRequest),
         }
@@ -76,6 +84,11 @@ const SelectionPopup: React.FC<Props> = ({
   const handleShare = () => {
     onShare(text); // Pass the selected text to the Sidebar
   };
+
+  // Log the token whenever it changes
+  useEffect(() => {
+    console.log("Token from context:", token);
+  }, [token]);
 
   return (
     <div

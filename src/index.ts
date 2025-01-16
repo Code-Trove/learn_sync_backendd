@@ -2,11 +2,10 @@ import express, { Express } from "express";
 import userRoutes from "./routes/user-routes";
 import contentRoutes from "./routes/content-routes";
 import contextRoutes from "./routes/context-routes";
-import socialRoutes from "./routes/social-routes";
-import socialMediaRoutes from "./routes/social-media-routes";
 import relationshipRoutes from "./routes/relationship-routes";
 import bodyParser from "body-parser";
 import { PrismaClient } from "@prisma/client";
+import { scheduleTweets } from "./jobs/tweetScheduler";
 import cors from "cors";
 
 const prisma = new PrismaClient();
@@ -18,15 +17,14 @@ app.use(bodyParser.urlencoded({ extended: true, limit: "50mb" }));
 
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "chrome-extension://pfhfekecgdbgebmmnbnmgjimbaklkeko", // Your extension ID
-    ],
-    credentials: true,
+    origin: "*", // Or specify your frontend origin here, like 'https://chatgpt.com'
+    credentials: true, // Allow credentials like cookies, authorization headers
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Callback-Url"],
   })
 );
+
+app.options("*", cors()); // Allow preflight requests
 
 // Health check endpoint
 app.get("/api/v1/health", (req, res) => {
@@ -51,8 +49,6 @@ const registerRoute = (path: string, router: express.Router) => {
 registerRoute("/api/v1", userRoutes);
 registerRoute("/api/v1", contentRoutes);
 registerRoute("/api/v1", contextRoutes);
-registerRoute("/api/v1", socialRoutes);
-registerRoute("/api/v1", socialMediaRoutes);
 registerRoute("/api/v1", relationshipRoutes);
 
 // Global error handler
@@ -75,6 +71,8 @@ async function startServer() {
   try {
     await prisma.$connect();
     console.log("Successfully connected to database");
+
+    scheduleTweets();
 
     const port = process.env.PORT || 3125;
     app.listen(port, () => {

@@ -2,6 +2,8 @@ import React, { useState, useEffect } from "react";
 
 import { createRoot } from "react-dom/client";
 import Cookies from "js-cookie";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 import { FaTwitter, FaLinkedin, FaFacebook, FaInstagram } from "react-icons/fa";
 import {
   TwitterShareButton,
@@ -29,7 +31,27 @@ const Login: React.FC<LoginProps> = ({ onLogin, onSwitchToRegister }) => {
 
       const data = await response.json();
       if (data.success) {
-        Cookies.set("token", data.token);
+        const token = data.token;
+
+        // Store the token in cookies
+        Cookies.set("token", token);
+
+        // Store the token in Chrome runtime storage
+        if (chrome.runtime && chrome.runtime.sendMessage) {
+          chrome.runtime.sendMessage(
+            { type: "SET_TOKEN", token },
+            (response) => {
+              if (response.status !== "success") {
+                console.error(
+                  "Error saving token in chrome runtime:",
+                  response.error
+                );
+              }
+            }
+          );
+        }
+
+        // Trigger onLogin callback
         onLogin();
       } else {
         alert("Login failed.");
@@ -158,6 +180,7 @@ const Popup = () => {
   const [twitterScreenName, setTwitterScreenName] = useState<string | null>(
     null
   );
+  const [scheduledTime, setScheduledTime] = useState(new Date());
 
   const handleCraftThought = async () => {
     try {
@@ -369,6 +392,41 @@ const Popup = () => {
     setTwitterScreenName(null);
     alert("Disconnected from Twitter.");
   };
+  const handleScheduledPost = async () => {
+    try {
+      const token = Cookies.get("token");
+
+      if (!scheduledTime || !craftedThoughts.twitter) {
+        alert("Please enter the content and select a date!");
+        return;
+      }
+
+      const response = await fetch(
+        "http://localhost:3125/api/v1/schedule/twitter",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            content: craftedThoughts.twitter,
+            scheduledTime: scheduledTime.toISOString(), // ISO format for Prisma compatibility
+          }),
+        }
+      );
+
+      const data = await response.json();
+      if (data.success) {
+        alert("Tweet scheduled successfully!");
+      } else {
+        alert(`Failed to schedule tweet: ${data.error}`);
+      }
+    } catch (error) {
+      console.error("Error scheduling tweet:", error);
+      alert("An unexpected error occurred.");
+    }
+  };
 
   return (
     <div className="p-4">
@@ -411,13 +469,32 @@ const Popup = () => {
             </div>
             <p className="my-2">{craftedThoughts.twitter}</p>
             {isTwitterConnected ? (
-              <button
-                onClick={handlePostToTwitter}
-                className="bg-[#1DA1F2] text-white px-4 py-2 rounded flex items-center gap-2"
-              >
-                <FaTwitter />
-                Post to Twitter
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={handlePostToTwitter}
+                  className="bg-[#1DA1F2] text-white px-4 py-2 rounded flex items-center gap-2"
+                >
+                  <FaTwitter />
+                  Post to Twitter
+                </button>
+                <div className="space-y-4">
+                  <DatePicker
+                    selected={scheduledTime}
+                    onChange={(date) => setScheduledTime(date!)}
+                    showTimeSelect
+                    timeFormat="HH:mm"
+                    dateFormat="Pp" // Displays date and time together
+                    minDate={new Date()} // Prevent selecting past dates
+                    className="border p-2 rounded"
+                  />
+                  <button
+                    onClick={handleScheduledPost}
+                    className="bg-[#1DA1F2] text-white px-4 py-2 rounded flex items-center gap-2"
+                  >
+                    Schedule Post
+                  </button>
+                </div>
+              </div>
             ) : (
               <div>
                 <button

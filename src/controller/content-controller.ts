@@ -29,26 +29,28 @@ interface AuthRequest extends Request {
     // other user properties...
   };
 }
-
+type User = {
+  id: number;
+};
 export const addContent = async (req: Request, res: Response): Promise<any> => {
   try {
-    const { type, title, userId, tags, link, extractedText } = req.body;
+    const { type, title, tags, link, extractedText } = req.body;
     console.log("Request body:", req.body);
 
     // Verify user exists
-    const user = req.user;
+    const user = req.user as User;
 
-    if (!user) {
-      // Create default user if not exists
-      const newUser = await prisma.user.create({
-        data: {
-          id: userId,
-          email: `user${userId}@example.com`, // temporary email
-          name: `User ${userId}`,
-          password: "defaultpassword", // should be hashed in production
-        },
-      });
-    }
+    // if (!user) {
+    //   // Create default user if not exists
+    //   const newUser = await prisma.user.create({
+    //     data: {
+    //       id: userId,
+    //       email: `user${userId}@example.com`, // temporary email
+    //       name: `User ${userId}`,
+    //       password: "defaultpassword", // should be hashed in production
+    //     },
+    //   });
+    // }
 
     // Process content
     const processedContent = extractedText
@@ -88,7 +90,7 @@ export const addContent = async (req: Request, res: Response): Promise<any> => {
         duration: processedContent.metadata.duration || 0,
         author: processedContent.metadata.author || "",
         publishedAt: processedContent.metadata.publishDate || new Date(),
-        userId,
+        userId: user.id as number,
         tags: {
           create: tags.map((tagTitle: string) => ({
             tag: {

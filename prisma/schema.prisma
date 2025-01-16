@@ -81,20 +81,35 @@ model TagsOnContents {
 }
 
 model User {
-  id            Int            @id @default(autoincrement())
-  email         String?        @unique
-  name          String
-  username      String?        @unique
-  twitterId     String?        @unique
-  twitterToken  String?
-  twitterSecret String?
-  linkedinId    String?        @unique
-  linkedinToken String?
-  password      String
-  contents      Content[]
-  links         Link[]
-  learningPaths LearningPath[]
-  shares        Share[]
+  id              Int              @id @default(autoincrement())
+  email           String?          @unique
+  name            String
+  username        String?          @unique
+  twitterId       String?          @unique
+  twitterToken    String?
+  twitterSecret   String?
+  linkedinId      String?          @unique
+  linkedinToken   String?
+  password        String
+  contents        Content[]
+  links           Link[]
+  learningPaths   LearningPath[]
+  shares          Share[]
+  scheduledTweets ScheduledTweet[] // Add this relation field
+}
+
+model ScheduledTweet {
+  id             Int      @id @default(autoincrement())
+  user_id        Int
+  content        String
+  twitter_token  String
+  twitter_secret String
+  scheduled_time DateTime
+  status         String   @default("PENDING")
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id])
 }
 
 model Link {

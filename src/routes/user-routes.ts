@@ -342,4 +342,40 @@ router.post("/post/twitter", authenticate, async (req: any, res: any) => {
   }
 });
 
+router.post("/schedule/twitter", authenticate, async (req: any, res: any) => {
+  try {
+    const user = req.user; // Get user from req.user (already authenticated)
+    const { content, scheduledTime } = req.body; // Extract content and scheduledTime from the body
+
+    // Validate user and Twitter credentials
+    if (!user || !user.twitterToken || !user.twitterSecret) {
+      return res.status(400).json({
+        success: false,
+        error: "Twitter not connected or missing credentials.",
+      });
+    }
+
+    // Insert the scheduled tweet into the database
+    const scheduledTweet = await prisma.scheduledTweet.create({
+      data: {
+        user_id: user.id, // Use the authenticated user's ID
+        content: content,
+        twitter_token: user.twitterToken,
+        twitter_secret: user.twitterSecret,
+        scheduled_time: new Date(scheduledTime),
+        status: "PENDING",
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Tweet scheduled successfully!",
+      data: scheduledTweet,
+    });
+  } catch (error) {
+    console.error("Error scheduling tweet:", error);
+    res.status(500).json({ success: false, error: "Internal Server Error" });
+  }
+});
+
 export default router;

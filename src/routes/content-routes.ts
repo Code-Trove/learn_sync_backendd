@@ -13,6 +13,7 @@ import {
   saveAndScheduleCraftedPost,
   postScheduledCraftedPost,
 } from "../controller/content-controller";
+import { authenticate } from "../middleware/authenticate";
 import { PrismaClient } from "@prisma/client";
 import { OpenAI } from "openai";
 import { Request, Response } from "express";
@@ -20,7 +21,7 @@ import { Request, Response } from "express";
 const router = express.Router();
 const prisma = new PrismaClient();
 
-router.post("/content/addContent", addContent);
+router.post("/content/addContent", authenticate, addContent);
 router.get("/get-content", getAllContent);
 router.post("/share/user", shareWithUser); // Share with specific user
 router.post("/share/public", makeContentPublic); // Make content public

@@ -8,11 +8,13 @@ module.exports = {
     popup: "./src/popup.tsx",
     background: "./src/background.ts",
     oauth_content: "./src/oauth_content.ts",
+    index: "./src/content/index.tsx",
   },
   output: {
     path: path.resolve(__dirname, "dist"),
-    filename: "[name].js",
+    filename: "[name].js", // Generate unique filenames for each entry (e.g., popup.js, background.js)
   },
+
   module: {
     rules: [
       {
@@ -33,7 +35,7 @@ module.exports = {
     new HtmlWebpackPlugin({
       template: "./public/popup.html",
       filename: "popup.html",
-      chunks: ["popup"],
+      chunks: ["popup"], // Include only the "popup" entry chunk
     }),
     new CopyWebpackPlugin({
       patterns: [

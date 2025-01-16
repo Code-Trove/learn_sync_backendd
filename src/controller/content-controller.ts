@@ -33,11 +33,10 @@ interface AuthRequest extends Request {
 export const addContent = async (req: Request, res: Response): Promise<any> => {
   try {
     const { type, title, userId, tags, link, extractedText } = req.body;
+    console.log("Request body:", req.body);
 
     // Verify user exists
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-    });
+    const user = req.user;
 
     if (!user) {
       // Create default user if not exists

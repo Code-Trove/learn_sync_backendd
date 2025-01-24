@@ -2,11 +2,17 @@ import express, { Express } from "express";
 import userRoutes from "./routes/user-routes";
 import contentRoutes from "./routes/content-routes";
 import contextRoutes from "./routes/context-routes";
+import postRoutes from "./routes/post-routes";
+import serachRoutes from "./routes/search-routes";
 import relationshipRoutes from "./routes/relationship-routes";
 import bodyParser from "body-parser";
 import { PrismaClient } from "@prisma/client";
 import { scheduleTweets } from "./jobs/tweetScheduler";
 import cors from "cors";
+import { extractMetadata } from "./controller/context-controller";
+import { Request, Response } from "express";
+import { analyzeImage } from "./utils/analyzeImage";
+import { processLargePdfFromUrl } from "./utils/pdf-parser";
 
 const prisma = new PrismaClient();
 const app: Express = express();
@@ -30,6 +36,34 @@ app.options("*", cors()); // Allow preflight requests
 app.get("/api/v1/health", (req, res) => {
   res.status(200).json({ status: "ok" });
 });
+app.post(
+  "/extract-metadata",
+  async (req: Request, res: Response): Promise<any> => {
+    const { url } = req.body;
+
+    if (!url) {
+      return res.status(400).json({
+        success: false,
+        message: "URL is required",
+      });
+    }
+
+    try {
+      const metadata = await extractMetadata(url);
+      return res.status(200).json({
+        success: true,
+        message: "Metadata extracted successfully",
+        data: metadata,
+      });
+    } catch (error) {
+      return res.status(500).json({
+        success: false,
+        message: "Error extracting metadata",
+        error: (error as Error).message,
+      });
+    }
+  }
+);
 
 // Register all routes with error handling
 const registerRoute = (path: string, router: express.Router) => {
@@ -50,6 +84,8 @@ registerRoute("/api/v1", userRoutes);
 registerRoute("/api/v1", contentRoutes);
 registerRoute("/api/v1", contextRoutes);
 registerRoute("/api/v1", relationshipRoutes);
+registerRoute("/api/v1", postRoutes);
+registerRoute("/api/v1", serachRoutes);
 
 // Global error handler
 app.use(

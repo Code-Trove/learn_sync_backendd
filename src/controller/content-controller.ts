@@ -1,5 +1,4 @@
 import { Request, Response } from "express";
-import { contentBody } from "../zod/content-zod";
 import { PrismaClient, ContentType, Prisma, Content } from "@prisma/client";
 import { generateUniqueLink } from "../utils/generate-link";
 import { processContent } from "../utils/content-processor";
@@ -9,8 +8,6 @@ import {
 } from "../utils/embeddings";
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
-import cheerio from "cheerio";
-import { craftPlatformPost, Platform } from "../utils/post-crafter";
 
 const prisma = new PrismaClient();
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY as string);
@@ -26,7 +23,6 @@ interface QuickCaptureOptions {
 interface AuthRequest extends Request {
   user: {
     id: number;
-    // other user properties...
   };
 }
 type User = {
@@ -37,22 +33,14 @@ export const addContent = async (req: Request, res: Response): Promise<any> => {
     const { type, title, tags, link, extractedText } = req.body;
     console.log("Request body:", req.body);
 
-    // Verify user exists
     const user = req.user as User;
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized: User not authenticated",
+      });
+    }
 
-    // if (!user) {
-    //   // Create default user if not exists
-    //   const newUser = await prisma.user.create({
-    //     data: {
-    //       id: userId,
-    //       email: `user${userId}@example.com`, // temporary email
-    //       name: `User ${userId}`,
-    //       password: "defaultpassword", // should be hashed in production
-    //     },
-    //   });
-    // }
-
-    // Process content
     const processedContent = extractedText
       ? {
           extractedText,
@@ -424,225 +412,225 @@ export const accessSharedContent = async (
 export const searchContent = async (
   req: Request,
   res: Response
-): Promise<void> => {
+): Promise<any> => {
   try {
-    const { query, type, userId } = req.query;
+    const { query } = req.query;
 
-    // If there's a search query, generate its embedding
-    let embedding = null;
-    if (query) {
-      embedding = await generateEmbedding(query as string);
+    if (!query || typeof query !== "string" || query.trim() === "") {
+      return res.status(400).json({
+        message: "Invalid search query",
+        success: false,
+      });
     }
 
-    const where: Prisma.ContentWhereInput = {
-      AND: [
-        userId ? { userId: Number(userId) } : {},
-        type ? { type: type as ContentType } : {},
-      ],
-    };
+    const user = req.user as User;
 
-    // If we have an embedding, use vector similarity search
-    const contents = await prisma.$queryRaw`
-      SELECT c.*, 
-             1 - (c.embedding <=> ${embedding}::vector) as similarity
-      FROM "Content" c
-      WHERE ${where}
-      ORDER BY similarity DESC
-      LIMIT 20
-    `;
+    const userId = user.id;
 
-    res.status(200).json({
-      message: "Search results retrieved successfully",
+    const contents = await prisma.content.findMany({
+      where: {
+        userId,
+        type: "TEXT",
+        OR: [
+          { title: { contains: query, mode: "insensitive" } },
+          { extractedText: { contains: query, mode: "insensitive" } },
+          { author: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      include: {
+        topics: true,
+        summaries: true,
+        tags: { include: { tag: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+    });
+
+    if (contents.length === 0) {
+      return res.status(404).json({
+        message: "No content found matching the query.",
+        success: false,
+      });
+    }
+
+    console.log("Search results:", contents);
+
+    return res.status(200).json({
+      message: "Search results retrieved successfully.",
       data: contents,
       success: true,
     });
-  } catch (error) {
-    console.error("Error in searchContent:", error);
-    res.status(500).json({
+  } catch (error: any) {
+    console.error("Error during search:", error);
+    return res.status(500).json({
       message: "Internal server error",
       success: false,
-      error: (error as Error).message,
+      error: error.message,
     });
   }
 };
 
-export const schedulePost = async (
+export const contentChat = async (
   req: Request,
   res: Response
-): Promise<void> => {
+): Promise<any> => {
   try {
-    const { platform, contentId, scheduledAt } = req.body;
-
-    const scheduledPost = await prisma.scheduledPost.create({
-      data: {
-        platform,
-        craftedPostId: contentId,
-        scheduledAt: new Date(scheduledAt),
-      },
-    });
-
-    res.status(201).json({
-      message: "Post scheduled successfully",
-      data: scheduledPost,
-      success: true,
-    });
-  } catch (error) {
-    console.error("Error scheduling post:", error);
-    res.status(500).json({
-      message: "Error scheduling post",
-      success: false,
-      error: (error as Error).message,
-    });
-  }
-};
-
-export const postScheduledContent = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    const { scheduledPostId } = req.body;
-
-    const scheduledPost = await prisma.scheduledPost.findUnique({
-      where: { id: scheduledPostId },
-      include: { craftedPost: true },
-    });
-
-    if (!scheduledPost) {
-      res.status(404).json({
-        message: "Scheduled post not found",
+    const { question, content, pageContext, sourceUrl } = req.body;
+    if (!content || !question || !pageContext || !sourceUrl) {
+      res.status(400).json({
         success: false,
+        error:
+          "Content, question, page context, and source URL must be provided",
+      });
+      return;
+    }
+    const isGreeting =
+      /\b(hi+|hello+|hey+|greet+|yo+|hlw+|hii+|hola+|sup)\b/i.test(question);
+
+    // Handle initial greeting response
+    if (isGreeting) {
+      res.status(200).json({
+        success: true,
+        response:
+          "Hello! 😊 Do you have a specific question, or would you like me to explain the content in detail? Let me know how I can assist you better!",
       });
       return;
     }
 
-    // Post content to the specified platform
-    const postContent = await craftPlatformPost(
+    const affirmativeResponses = ["yes", "sure", "go ahead", "explain", "okay"];
+    if (affirmativeResponses.includes(question.toLowerCase())) {
+      res.status(200).json({
+        success: true,
+        response: `
+        Certainly! Here's a detailed explanation based on the provided content:
+        "${content}"
+        
+        I'll break it down with real-world examples, practical applications, and analogies to ensure clarity. If you have further questions, feel free to ask! 😊
+      `,
+      });
+      return;
+    }
+    const requestBody = {
+      contents: [
+        {
+          parts: [
+            {
+              text: `
+              Full Page Context: "${pageContext}"
+              Source URL: "${sourceUrl}"
+              
+              Content for analysis: "${content}"
+              
+              User's Question: "${question}"
+              
+              Answer the user's question directly with a detailed explanation. If the question is unclear, politely ask for clarification. If the question is related to the content, explain thoroughly using real-world analogies, practical examples, and references for clarity.
+              
+              After answering, ask the user:
+              "Would you like to move to the next topic or deep dive into this topic?"
+            `,
+            },
+          ],
+        },
+      ],
+    };
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
-        summary: scheduledPost.craftedPost.content || "",
-        keyPoints: scheduledPost.craftedPost.hashtags,
-        learnings: "Scheduled post from my learning journey",
-      },
-      scheduledPost.platform as Platform,
-      "minimal"
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      }
+    );
+    console.log("Gemini API response status:", response);
+
+    const data = await response.json();
+    console.log(
+      "Full response from Gemini API:",
+      JSON.stringify(data, null, 2)
     );
 
-    // Mark the post as posted
-    await prisma.scheduledPost.update({
-      where: { id: scheduledPostId },
-      data: { posted: true },
-    });
-
-    res.status(200).json({
-      message: "Post published successfully",
-      data: postContent,
-      success: true,
-    });
-  } catch (error) {
-    console.error("Error posting scheduled content:", error);
-    res.status(500).json({
-      message: "Error posting scheduled content",
-      success: false,
-      error: (error as Error).message,
-    });
-  }
-};
-
-export const saveAndScheduleCraftedPost = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
-  try {
-    const { platform, content, hashtags, scheduledAt } = req.body;
-
-    const craftedPost = await prisma.craftedPost.create({
-      data: {
-        platform,
-        content,
-        hashtags,
-        scheduledAt: scheduledAt ? new Date(scheduledAt) : null,
-      },
-    });
-
-    if (scheduledAt) {
-      const scheduledPost = await prisma.scheduledPost.create({
-        data: {
-          platform,
-          craftedPostId: craftedPost.id,
-          scheduledAt: new Date(scheduledAt),
-        },
-      });
-
-      res.status(201).json({
-        message: "Crafted post saved and scheduled successfully",
-        data: { craftedPost, scheduledPost },
+    if (data.candidates && data.candidates.length > 0) {
+      const candidateContent =
+        data.candidates[0].content?.parts[0]?.text || "No valid content found.";
+      res.status(200).json({
         success: true,
+        response: candidateContent,
       });
     } else {
-      res.status(201).json({
-        message: "Crafted post saved successfully",
-        data: craftedPost,
-        success: true,
+      res.status(400).json({
+        success: false,
+        error: "Gemini API returned no valid candidates",
       });
     }
   } catch (error) {
-    console.error("Error saving and scheduling crafted post:", error);
+    console.error("Chat processing failed:", error);
     res.status(500).json({
-      message: "Error saving and scheduling crafted post",
       success: false,
-      error: (error as Error).message,
+      error: "Failed to process chat, please try again later.",
     });
   }
 };
 
-export const postScheduledCraftedPost = async (
-  req: Request,
-  res: Response
-): Promise<void> => {
+export const contentSummarization = async (req: Request, res: Response) => {
   try {
-    const { scheduledPostId } = req.body;
+    const { content, discussion } = req.body;
 
-    const scheduledPost = await prisma.scheduledPost.findUnique({
-      where: { id: scheduledPostId },
-      include: { craftedPost: true },
-    });
+    const summaryPrompt = {
+      contents: [
+        {
+          parts: [
+            {
+              text: `Summarize this content and discussion into a clear, engaging format.
+                Content: ${content}
+                Discussion: ${JSON.stringify(discussion)}
+                
+                Requirements:
+                - Create a concise summary
+                - Focus on key points
+                - Use professional tone
+                - Avoid mentioning user interactions or discussions
+                - Avoid technical jargon
+                - Make it readable and shareable
+                - Focus only on relevant information from the content
+                
+                Format the response as plain text without any special formatting.`,
+            },
+          ],
+        },
+      ],
+    };
 
-    if (!scheduledPost) {
-      res.status(404).json({
-        message: "Scheduled post not found",
-        success: false,
-      });
-      return;
-    }
-
-    // Post content to the specified platform
-    const postContent = await craftPlatformPost(
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
       {
-        summary: scheduledPost.craftedPost.content,
-        keyPoints: [],
-        learnings: "Scheduled post from my learning journey",
-      },
-      scheduledPost.platform as Platform,
-      "minimal"
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(summaryPrompt),
+      }
     );
 
-    // Mark the post as posted
-    await prisma.scheduledPost.update({
-      where: { id: scheduledPostId },
-      data: { posted: true },
-    });
+    const data = await response.json();
+
+    // Extract clean text from Gemini response
+    const summaryText =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "";
+
+    if (!summaryText) {
+      throw new Error("Failed to generate summary");
+    }
 
     res.status(200).json({
-      message: "Post published successfully",
-      data: postContent,
       success: true,
+      summary: summaryText,
     });
   } catch (error) {
-    console.error("Error posting scheduled crafted post:", error);
+    console.error("Summary generation failed:", error);
     res.status(500).json({
-      message: "Error posting scheduled crafted post",
       success: false,
-      error: (error as Error).message,
+      error:
+        error instanceof Error ? error.message : "Failed to generate summary",
     });
   }
 };

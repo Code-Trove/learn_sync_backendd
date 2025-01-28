@@ -198,7 +198,6 @@ export const generateGeneralResponse = async (
     const data = await response.json();
     const generatedText = data.candidates[0].content?.parts[0]?.text.trim();
 
-    // Fallback response if no text generated
     return (
       generatedText ||
       `I'm still learning about ${

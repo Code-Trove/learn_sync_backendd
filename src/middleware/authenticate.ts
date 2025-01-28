@@ -10,7 +10,7 @@ export const authenticate = async (
   next: NextFunction
 ): Promise<any> => {
   const authHeader = req.headers.authorization;
-  console.log(authHeader);
+  console.log("authheader", authHeader);
 
   if (!authHeader) {
     return res.status(401).json({

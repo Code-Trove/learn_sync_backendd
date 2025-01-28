@@ -1,5 +1,6 @@
 import express from "express";
 import {
+  analyzeCommit,
   craftPosts,
   craftThougts,
   postToTwitter,
@@ -13,5 +14,6 @@ router.post("/content/craft-posts", craftPosts);
 router.post("/content/craft-thought", craftThougts);
 router.post("/post/twitter", authenticate, postToTwitter);
 router.post("/schedule/twitter", authenticate, scheduledTweets);
+router.post("/analyze-commit", authenticate, analyzeCommit);
 
 export default router;
